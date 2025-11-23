@@ -4,7 +4,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:zottz_ot/blutoth_service.dart';
 
 class DeviceScanScreen extends StatefulWidget {
   final String userName;
@@ -16,34 +15,27 @@ class DeviceScanScreen extends StatefulWidget {
 }
 
 class _DeviceScanScreenState extends State<DeviceScanScreen> {
-  List<ScanResult> _devices = [];
-  bool _isScanning = false;
-  BluetoothDevice? _connectedDevice;
-  bool _isConnecting = false;
-  StreamSubscription<List<ScanResult>>? _scanSubscription;
-  StreamSubscription<BluetoothAdapterState>? _stateSubscription;
-  StreamSubscription<bool>? _scanningSubscription;
+  List<BluetoothDevice> _devices = [];
+  bool _scanning = false;
+  late StreamSubscription<List<ScanResult>> _scanSubscription;
   BluetoothAdapterState _adapterState = BluetoothAdapterState.unknown;
-  final BluetoothManager _bluetoothManager = BluetoothManager();
 
   @override
   void initState() {
     super.initState();
-    _checkPermissions();
-    _listenToAdapterState();
-    _listenToScanningState();
+    _requestPermissions();
+    _listenToBluetoothState();
   }
 
-  Future<void> _checkPermissions() async {
-    // Request necessary permissions
+  Future<void> _requestPermissions() async {
     Map<Permission, PermissionStatus> statuses = await [
-      Permission.bluetooth,   
+      Permission.bluetooth,
       Permission.bluetoothConnect,
       Permission.bluetoothScan,
       Permission.locationWhenInUse,
     ].request();
 
-    // Check if all permissions are granted
+    // Check if permissions are denied
     if (statuses[Permission.bluetooth]!.isDenied ||
         statuses[Permission.bluetoothConnect]!.isDenied ||
         statuses[Permission.bluetoothScan]!.isDenied) {
@@ -51,105 +43,82 @@ class _DeviceScanScreenState extends State<DeviceScanScreen> {
     }
   }
 
-  void _listenToAdapterState() {
-    _stateSubscription = FlutterBluePlus.adapterState.listen((state) {
+  void _listenToBluetoothState() {
+    FlutterBluePlus.adapterState.listen((state) {
       setState(() {
         _adapterState = state;
       });
-      
-      if (state == BluetoothAdapterState.on && !_isScanning) {
-        _startScan();
-      }
     });
   }
 
-  void _listenToScanningState() {
-    _scanningSubscription = FlutterBluePlus.isScanning.listen((isScanning) {
-      setState(() {
-        _isScanning = isScanning;
-      });
-    });
-  }
-
-  void _startScan() {
-    if (_adapterState != BluetoothAdapterState.on) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enable Bluetooth')),
-      );
-      return;
-    }
-
-    setState(() {
-      _devices.clear();
-    });
-
-    // Listen to scan results
-    _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
-      if (mounted) {
-        setState(() {
-          // Filter out devices with empty names and remove duplicates
-          _devices = results
-              .where((result) => result.device.platformName.isNotEmpty)
-              .toSet() // Remove duplicates
-              .toList();
-        });
-      }
-    }, onError: (e) {
-      print('Scan error: $e');
-    });
-
-    // Start scan
-    FlutterBluePlus.startScan(
-      withServices: [],
-      timeout: const Duration(seconds: 10),
-    );
-  }
-
-  void _stopScan() {
-    _scanSubscription?.cancel();
-    FlutterBluePlus.stopScan();
-  }
-
-  Future<void> _connectToDevice(BluetoothDevice device) async {
+  void _scanDevices(bool enable) async {
     try {
-      setState(() {
-        _isConnecting = true;
-        _connectedDevice = device;
-      });
-
-      await _bluetoothManager.connectToDevice(device);
-      
-      // Verify connection
-      if (device.connectionState == BluetoothConnectionState.connected) {
+      // Check Bluetooth state
+      if (_adapterState != BluetoothAdapterState.on) {
         if (mounted) {
-          Navigator.pushNamed(
-            context,
-            '/led_sound',
-            arguments: {
-              'userName': widget.userName,
-              'device': device,
-            },
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Please enable Bluetooth on your device')),
           );
         }
+        setState(() {
+          _scanning = false;
+        });
+        return;
+      }
+
+      setState(() {
+        _scanning = enable;
+      });
+
+      if (enable) {
+        _devices.clear();
+        
+        _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
+          if (mounted) {
+            for (ScanResult result in results) {
+              // Only add devices with names and remove duplicates
+              if (result.device.platformName.isNotEmpty && 
+                  !_devices.any((device) => device.remoteId == result.device.remoteId)) {
+                setState(() {
+                  _devices.add(result.device);
+                });
+              }
+            }
+          }
+        }, onError: (e) {
+          print('Scan error: $e');
+          if (mounted) {
+            setState(() {
+              _scanning = false;
+            });
+          }
+        });
+
+        // Start scan
+        await FlutterBluePlus.startScan(
+          timeout: Duration(seconds: 10),
+          withServices: [],
+        );
+        
+        // Auto stop after 10 seconds
+        Future.delayed(Duration(seconds: 10), () {
+          if (mounted && _scanning) {
+            _scanDevices(false);
+          }
+        });
       } else {
-        throw Exception('Connection failed - device not connected');
+        await FlutterBluePlus.stopScan();
+        _scanSubscription.cancel();
       }
     } catch (e) {
-      print('Connection error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to connect: ${e.toString()}'),
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
-    } finally {
+      print('Error in _scanDevices: $e');
       if (mounted) {
         setState(() {
-          _isConnecting = false;
-          _connectedDevice = null;
+          _scanning = false;
         });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error scanning devices: $e')),
+        );
       }
     }
   }
@@ -200,11 +169,20 @@ class _DeviceScanScreenState extends State<DeviceScanScreen> {
       appBar: AppBar(
         title: const Text('Scan Devices'),
         actions: [
-          if (_adapterState == BluetoothAdapterState.on)
-            IconButton(
-              icon: Icon(_isScanning ? Icons.stop : Icons.refresh),
-              onPressed: _isScanning ? _stopScan : _startScan,
-            ),
+          IconButton(
+            icon: _scanning ? Icon(Icons.stop) : Icon(Icons.search),
+            onPressed: () => _scanning ? _scanDevices(false) : _scanDevices(true),
+          ),
+          IconButton(
+            icon: Icon(Icons.refresh),
+            onPressed: () {
+              _scanDevices(false);
+              setState(() {
+                _devices.clear();
+              });
+              _scanDevices(true);
+            },
+          ),
         ],
       ),
       body: Column(
@@ -217,95 +195,78 @@ class _DeviceScanScreenState extends State<DeviceScanScreen> {
               style: TextStyle(fontSize: 16),
             ),
           ),
-          if (_adapterState != BluetoothAdapterState.on)
-            Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.bluetooth_disabled, size: 64, color: Colors.grey),
-                    const SizedBox(height: 16),
-                    const Text('Bluetooth is disabled'),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: () {
-                        FlutterBluePlus.turnOn();
-                      },
-                      child: const Text('Enable Bluetooth'),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          else
-            Expanded(
-              child: _devices.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          if (_isScanning) const CircularProgressIndicator(),
-                          const SizedBox(height: 16),
-                          Text(
-                            _isScanning 
-                                ? 'Scanning for devices...' 
-                                : 'No devices found\nTap refresh to scan again',
-                            textAlign: TextAlign.center,
+          if (_scanning) LinearProgressIndicator(),
+          Expanded(
+            child: _devices.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.bluetooth_disabled,
+                          size: 64,
+                          color: Colors.grey,
+                        ),
+                        SizedBox(height: 16),
+                        Text(
+                          _scanning ? 'Scanning for devices...' : 'No devices found',
+                          style: TextStyle(
+                            fontSize: 18,
+                            color: Colors.grey,
                           ),
-                          if (!_isScanning)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 16),
-                              child: ElevatedButton(
-                                onPressed: _startScan,
-                                child: const Text('Start Scan'),
-                              ),
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          _scanning ? 'Please wait...' : 'Tap the search icon to start scanning',
+                          style: TextStyle(
+                            color: Colors.grey,
+                          ),
+                        ),
+                        if (!_scanning && _adapterState != BluetoothAdapterState.on)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 16),
+                            child: ElevatedButton(
+                              onPressed: () {
+                                FlutterBluePlus.turnOn();
+                              },
+                              child: const Text('Enable Bluetooth'),
                             ),
-                        ],
-                      ),
-                    )
-                  : RefreshIndicator(
-                      onRefresh: () async {
-                        _stopScan();
-                        await Future.delayed(const Duration(milliseconds: 500));
-                        _startScan();
-                      },
-                      child: ListView.builder(
-                        itemCount: _devices.length,
-                        itemBuilder: (context, index) {
-                          final result = _devices[index];
-                          final device = result.device;
-                          final bool isConnectingThisDevice = _isConnecting && _connectedDevice?.remoteId == device.remoteId;
-                          final bool isConnected = device.connectionState == BluetoothConnectionState.connected;
-                          
-                          return Card(
-                            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                            child: ListTile(
-                              leading: const Icon(Icons.bluetooth),
-                              title: Text(device.platformName),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(device.remoteId.str),
-                                  if (result.rssi != 0)
-                                    Text('RSSI: ${result.rssi} dBm'),
-                                ],
-                              ),
-                              trailing: isConnectingThisDevice
-                                  ? const SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(strokeWidth: 2),
-                                    )
-                                  : isConnected
-                                      ? const Icon(Icons.link, color: Colors.green)
-                                      : const Icon(Icons.link_off, color: Colors.grey),
-                              onTap: isConnectingThisDevice ? null : () => _connectToDevice(device),
-                            ),
-                          );
-                        },
-                      ),
+                          ),
+                      ],
                     ),
-            ),
+                  )
+                : ListView.builder(
+                    itemCount: _devices.length,
+                    itemBuilder: (context, index) {
+                      final device = _devices[index];
+                      return Card(
+                        margin: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                        child: ListTile(
+                          leading: Icon(Icons.bluetooth),
+                          title: Text(
+                            device.platformName,
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          subtitle: Text(device.remoteId.toString()),
+                          trailing: Icon(Icons.arrow_forward_ios, size: 16),
+                          onTap: () {
+                            _scanDevices(false);
+                            // Navigate directly like in your working code
+                            // Connection will be handled in the next screen
+                            Navigator.pushNamed(
+                              context,
+                              '/led_sound',
+                              arguments: {
+                                'userName': widget.userName,
+                                'device': device,
+                              },
+                            );
+                          },
+                        ),
+                      );
+                    },
+                  ),
+          ),
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: ElevatedButton(
@@ -321,15 +282,25 @@ class _DeviceScanScreenState extends State<DeviceScanScreen> {
           ),
         ],
       ),
+      floatingActionButton: _devices.isNotEmpty && !_scanning
+          ? FloatingActionButton(
+              onPressed: () {
+                _scanDevices(false);
+                setState(() {
+                  _devices.clear();
+                });
+                _scanDevices(true);
+              },
+              child: Icon(Icons.refresh),
+              tooltip: 'Scan Again',
+            )
+          : null,
     );
   }
 
   @override
   void dispose() {
-    _scanSubscription?.cancel();
-    _stateSubscription?.cancel();
-    _scanningSubscription?.cancel();
-    _stopScan();
+    _scanDevices(false);
     super.dispose();
   }
 }

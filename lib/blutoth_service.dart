@@ -39,11 +39,24 @@ class BluetoothManager {
 
   // Connect to device
   Future<void> connectToDevice(BluetoothDevice device, {Duration? timeout}) async {
-    try {
+    try {       
+      // Check if already connected
+      if (device.connectionState == BluetoothConnectionState.connected) {
+        return;
+      }
+      
       await device.connect(
         timeout: timeout ?? const Duration(seconds: 15),
         autoConnect: false,
       );
+      
+      // Wait for connection to establish
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // Verify connection
+      if (device.connectionState != BluetoothConnectionState.connected) {
+        throw Exception('Device not connected after connection attempt');
+      }
     } catch (e) {
       throw Exception('Failed to connect to device: $e');
     }
@@ -117,9 +130,9 @@ class BluetoothManager {
     }
   }
 
-Future<List<BluetoothDevice>> get connectedDevices async {
-  return FlutterBluePlus.connectedDevices;
-}
+  Future<List<BluetoothDevice>> get connectedDevices async {
+    return FlutterBluePlus.connectedDevices;
+  }
 
   // Turn Bluetooth on
   Future<void> turnOnBluetooth() async {

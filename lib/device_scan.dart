@@ -19,10 +19,12 @@ class _DeviceScanScreenState extends State<DeviceScanScreen> {
   List<ScanResult> _devices = [];
   bool _isScanning = false;
   BluetoothDevice? _connectedDevice;
+  bool _isConnecting = false;
   StreamSubscription<List<ScanResult>>? _scanSubscription;
   StreamSubscription<BluetoothAdapterState>? _stateSubscription;
   StreamSubscription<bool>? _scanningSubscription;
   BluetoothAdapterState _adapterState = BluetoothAdapterState.unknown;
+  final BluetoothManager _bluetoothManager = BluetoothManager();
 
   @override
   void initState() {
@@ -108,36 +110,49 @@ class _DeviceScanScreenState extends State<DeviceScanScreen> {
     FlutterBluePlus.stopScan();
   }
 
-  // Future<void> _connectToDevice(BluetoothDevice device) async {
-  //   try {
-  //     setState(() {
-  //       _connectedDevice = device;
-  //     });
+  Future<void> _connectToDevice(BluetoothDevice device) async {
+    try {
+      setState(() {
+        _isConnecting = true;
+        _connectedDevice = device;
+      });
 
-  //     await device.connect(timeout: const Duration(seconds: 15), autoConnect: false);
-
-  //     if (mounted) {
-  //       // Navigate to LED & Sound selection screen
-  //       Navigator.pushNamed(
-  //         context,
-  //         '/led_sound',
-  //         arguments: {
-  //           'userName': widget.userName,
-  //           'device': device,
-  //         },
-  //       );
-  //     }
-  //   } catch (e) {
-  //     if (mounted) {
-  //       ScaffoldMessenger.of(context).showSnackBar(
-  //         SnackBar(content: Text('Failed to connect: $e')),
-  //       );
-  //     }
-  //     setState(() {
-  //       _connectedDevice = null;
-  //     });
-  //   }
-  // }
+      await _bluetoothManager.connectToDevice(device);
+      
+      // Verify connection
+      if (device.connectionState == BluetoothConnectionState.connected) {
+        if (mounted) {
+          Navigator.pushNamed(
+            context,
+            '/led_sound',
+            arguments: {
+              'userName': widget.userName,
+              'device': device,
+            },
+          );
+        }
+      } else {
+        throw Exception('Connection failed - device not connected');
+      }
+    } catch (e) {
+      print('Connection error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to connect: ${e.toString()}'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isConnecting = false;
+          _connectedDevice = null;
+        });
+      }
+    }
+  }
 
   Widget _buildBluetoothStateIndicator() {
     Color color;
@@ -259,6 +274,8 @@ class _DeviceScanScreenState extends State<DeviceScanScreen> {
                         itemBuilder: (context, index) {
                           final result = _devices[index];
                           final device = result.device;
+                          final bool isConnectingThisDevice = _isConnecting && _connectedDevice?.remoteId == device.remoteId;
+                          final bool isConnected = device.connectionState == BluetoothConnectionState.connected;
                           
                           return Card(
                             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -273,25 +290,18 @@ class _DeviceScanScreenState extends State<DeviceScanScreen> {
                                     Text('RSSI: ${result.rssi} dBm'),
                                 ],
                               ),
-                              trailing: device.connectionState == BluetoothConnectionState.connected
-                                  ? const Icon(Icons.link, color: Colors.green)
-                                  : const Icon(Icons.link_off, color: Colors.grey),
-                              onTap: () => BluetoothManager().connectToDevice(device).then((_) {
-                                Navigator.pushNamed(
-                                  context,
-                                  '/led_sound',
-                                  arguments: {
-                                    'userName': widget.userName,
-                                    'device': device,
-                                  },
-                                );
-                              }).catchError((e) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Failed to connect: $e')),
-                                );
-                              }
+                              trailing: isConnectingThisDevice
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    )
+                                  : isConnected
+                                      ? const Icon(Icons.link, color: Colors.green)
+                                      : const Icon(Icons.link_off, color: Colors.grey),
+                              onTap: isConnectingThisDevice ? null : () => _connectToDevice(device),
                             ),
-                            ));
+                          );
                         },
                       ),
                     ),

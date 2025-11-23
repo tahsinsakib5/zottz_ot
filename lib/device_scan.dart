@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:zottz_ot/blutoth_service.dart';
 
 class DeviceScanScreen extends StatefulWidget {
   final String userName;
@@ -34,7 +35,7 @@ class _DeviceScanScreenState extends State<DeviceScanScreen> {
   Future<void> _checkPermissions() async {
     // Request necessary permissions
     Map<Permission, PermissionStatus> statuses = await [
-      Permission.bluetooth,
+      Permission.bluetooth,   
       Permission.bluetoothConnect,
       Permission.bluetoothScan,
       Permission.locationWhenInUse,
@@ -107,36 +108,36 @@ class _DeviceScanScreenState extends State<DeviceScanScreen> {
     FlutterBluePlus.stopScan();
   }
 
-  Future<void> _connectToDevice(BluetoothDevice device) async {
-    try {
-      setState(() {
-        _connectedDevice = device;
-      });
+  // Future<void> _connectToDevice(BluetoothDevice device) async {
+  //   try {
+  //     setState(() {
+  //       _connectedDevice = device;
+  //     });
 
-      await device.connect(timeout: const Duration(seconds: 15), autoConnect: false);
+  //     await device.connect(timeout: const Duration(seconds: 15), autoConnect: false);
 
-      if (mounted) {
-        // Navigate to LED & Sound selection screen
-        Navigator.pushNamed(
-          context,
-          '/led_sound',
-          arguments: {
-            'userName': widget.userName,
-            'device': device,
-          },
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to connect: $e')),
-        );
-      }
-      setState(() {
-        _connectedDevice = null;
-      });
-    }
-  }
+  //     if (mounted) {
+  //       // Navigate to LED & Sound selection screen
+  //       Navigator.pushNamed(
+  //         context,
+  //         '/led_sound',
+  //         arguments: {
+  //           'userName': widget.userName,
+  //           'device': device,
+  //         },
+  //       );
+  //     }
+  //   } catch (e) {
+  //     if (mounted) {
+  //       ScaffoldMessenger.of(context).showSnackBar(
+  //         SnackBar(content: Text('Failed to connect: $e')),
+  //       );
+  //     }
+  //     setState(() {
+  //       _connectedDevice = null;
+  //     });
+  //   }
+  // }
 
   Widget _buildBluetoothStateIndicator() {
     Color color;
@@ -275,9 +276,22 @@ class _DeviceScanScreenState extends State<DeviceScanScreen> {
                               trailing: device.connectionState == BluetoothConnectionState.connected
                                   ? const Icon(Icons.link, color: Colors.green)
                                   : const Icon(Icons.link_off, color: Colors.grey),
-                              onTap: () => _connectToDevice(device),
+                              onTap: () => BluetoothManager().connectToDevice(device).then((_) {
+                                Navigator.pushNamed(
+                                  context,
+                                  '/led_sound',
+                                  arguments: {
+                                    'userName': widget.userName,
+                                    'device': device,
+                                  },
+                                );
+                              }).catchError((e) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Failed to connect: $e')),
+                                );
+                              }
                             ),
-                          );
+                            ));
                         },
                       ),
                     ),

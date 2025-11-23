@@ -45,5 +45,23 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+
+
+	<key>NSBluetoothAlwaysUsageDescription</key>
+    <string>This app needs Bluetooth access to connect to HM-10 devices</string>
+    
+    <key>NSBluetoothPeripheralUsageDescription</key>
+    <string>This app needs Bluetooth access to connect to HM-10 devices</string>
+    
+    <!-- Required for iOS 13+ -->
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>This app needs Bluetooth access to connect to HM-10 devices</string>
+    
+    <!-- Background modes (if needed) -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>bluetooth-central</string>
+    </array>
+	
 </dict>
 </plist>

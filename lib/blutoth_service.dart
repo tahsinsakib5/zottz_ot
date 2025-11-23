@@ -40,10 +40,10 @@ class BluetoothManager {
   // Connect to device
   Future<void> connectToDevice(BluetoothDevice device, {Duration? timeout}) async {
     try {
-      // await device.connect(
-      //   timeout: timeout ?? const Duration(seconds: 15),
-      //   autoConnect: false,
-      // );
+      await device.connect(
+        timeout: timeout ?? const Duration(seconds: 15),
+        autoConnect: false,
+      );
     } catch (e) {
       throw Exception('Failed to connect to device: $e');
     }

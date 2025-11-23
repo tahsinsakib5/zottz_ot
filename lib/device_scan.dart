@@ -113,7 +113,7 @@ class _DeviceScanScreenState extends State<DeviceScanScreen> {
         _connectedDevice = device;
       });
 
-      // await device.connect(timeout: const Duration(seconds: 15), license: null);
+      await device.connect(timeout: const Duration(seconds: 15), autoConnect: false);
 
       if (mounted) {
         // Navigate to LED & Sound selection screen
